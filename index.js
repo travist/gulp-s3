@@ -19,7 +19,7 @@ module.exports = function (aws, options) {
 
     var uploadPath = file.path.replace(file.base, options.uploadPath || '');
     uploadPath = uploadPath.replace(new RegExp('\\\\', 'g'), '/');
-    
+
     var headers = { 'x-amz-acl': 'public-read' };
 
     if (options.headers) {
@@ -53,26 +53,35 @@ module.exports = function (aws, options) {
 
     headers['Content-Length'] = contentLength;
 
-    client.putBuffer(file.contents, uploadPath, headers, function(err, res) {
-      if (err || res && res.statusCode !== 200) {
-        gutil.log(gutil.colors.red('[FAILED]', file.path + " -> " + uploadPath));
+    const uploadFile = (retries = 0) => {
+      client.putBuffer(file.contents, uploadPath, headers, function(err, res) {
+        if (err || res && res.statusCode !== 200) {
+          if (retries < 5) {
+            gutil.log(gutil.colors.red('[FAILED] but retrying...', file.path + " -> " + uploadPath));
+            setTimeout(() => uploadFile(++retries), 100);
+          }
+          else {
+            gutil.log(gutil.colors.red('[FAILED]', file.path + " -> " + uploadPath));
 
-        if (err) {
-          gutil.log(gutil.colors.red('  AWS ERROR:', err));
-          throw new Error(err);
-        } 
-        
-        if (res && res.statusCode !== 200){
-          gutil.log(gutil.colors.red('  HTTP STATUS:', res.statusCode));
-          throw new Error('HTTP Status Code: ' + res.statusCode);
+            if (err) {
+              gutil.log(gutil.colors.red('  AWS ERROR:', err));
+              throw new Error(err);
+            }
+
+            if (res && res.statusCode !== 200){
+              gutil.log(gutil.colors.red('  HTTP STATUS:', res.statusCode));
+              throw new Error('HTTP Status Code: ' + res.statusCode);
+            }
+
+            finished(err, null);
+          }
+        } else {
+          gutil.log(gutil.colors.green('[SUCCESS]') + ' ' + gutil.colors.grey(file.path) + gutil.colors.green(" -> ") + uploadPath);
+          res.resume();
+          finished(null, file)
         }
-
-        finished(err, null)
-      } else {
-        gutil.log(gutil.colors.green('[SUCCESS]') + ' ' + gutil.colors.grey(file.path) + gutil.colors.green(" -> ") + uploadPath);
-        res.resume();
-        finished(null, file)
-      }
-    });
+      });
+    };
+    uploadFile();
   });
 };
